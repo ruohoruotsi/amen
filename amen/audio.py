@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
 '''
-AMEN Audio analysis
+Audio analysis
 '''
+
 import os
 import pandas as pd
 import numpy as np
@@ -123,7 +125,9 @@ class Audio(object):
         Create timings in a timings dict.
         """
         timings = {}
+        timings['track'] = TimingList('track', [(0, self.duration)], self)
         timings['beats'] = TimingList('beats', self._get_beats(), self)
+        timings['segments'] = TimingList('segments', self._get_segments(), self)
         return timings
 
     def _get_beats(self):
@@ -146,6 +150,22 @@ class Audio(object):
 
         return starts_durs
 
+    def _get_segments(self):
+        """
+        Gets Echo Nest style segments using librosa's onset detection and backtracking.
+        """
+
+        onset_frames  = librosa.onset.onset_detect(y=self.analysis_samples,
+                                                sr=self.analysis_sample_rate,
+                                                backtrack=True)
+        segment_times = librosa.frames_to_time(onset_frames,
+                                               sr=self.analysis_sample_rate)
+
+        # make the list of (start, duration) tuples that TimingList expects
+        starts_durs = [(s, t-s) for (s, t) in zip(segment_times, segment_times[1:])]
+
+        return starts_durs
+
     def _create_features(self):
         """
         Creates the FeatureCollection, and loads each feature.
@@ -162,7 +182,9 @@ class Audio(object):
         features = FeatureCollection()
         features['centroid'] = self._get_centroid()
         features['amplitude'] = self._get_amplitude()
+        features['timbre'] = self._get_timbre()
         features['chroma'] = self._get_chroma()
+        features['tempo'] = self._get_tempo()
         return features
 
     def _get_centroid(self):
@@ -197,6 +219,28 @@ class Audio(object):
         feature = Feature(data)
         return feature
 
+    def _get_timbre(self):
+        """
+        Gets timbre (MFCC) data, taking the first 20.
+        Note that the keys to the Feature are "mffc_<index>", 
+        to avoid having a dict-like object with numeric keys.
+
+        Parameters
+        ---------
+
+        Returns
+        -----
+        Feature
+        """
+        mfccs = librosa.feature.mfcc(y=self.analysis_samples, sr=self.analysis_sample_rate, n_mfcc=12)
+        feature = FeatureCollection()
+        for index, mfcc in enumerate(mfccs):
+            data = self._convert_to_dataframe(mfcc, ['timbre'])
+            key = 'mfcc_%s' % (index)
+            feature[key] = Feature(data)
+
+        return feature
+
     def _get_chroma(self):
         """
         Gets chroma data from librosa, and returns it as a FeatureCollection,
@@ -222,6 +266,26 @@ class Audio(object):
         feature['gb'] = feature['f#']
         feature['g#'] = feature['ab']
         feature['a#'] = feature['bb']
+
+        return feature
+
+    def _get_tempo(self):
+        """
+        Gets tempo data from librosa, and returns it as a feature collection.
+        Note that the tempo feature uses median aggregation, as opposed to the
+        default mean.
+
+        Parameters
+        ---------
+
+        Returns
+        -----
+        FeatureCollection
+        """
+        onset_env = librosa.onset.onset_strength(self.analysis_samples, sr=self.analysis_sample_rate)
+        tempo = librosa.beat.tempo(onset_envelope=onset_env, sr=self.analysis_sample_rate, aggregate=None)
+        data = self._convert_to_dataframe(tempo, ['tempo'])
+        feature = Feature(data, aggregate=np.median)
 
         return feature
 
