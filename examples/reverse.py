@@ -5,7 +5,6 @@
 reverse.py : Reverse the beats of a song.
 """
 
-import sys
 from amen.audio import Audio
 from amen.utils import example_audio_file
 from amen.synthesize import synthesize
@@ -18,4 +17,3 @@ beats.reverse()
 
 out = synthesize(beats)
 out.output('reversed.wav')
-
